@@ -9,12 +9,17 @@ from sklearn.svm import SVC
 from sklearn.model_selection import GridSearchCV
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.feature_extraction.text import TfidfTransformer
+from sklearn.decomposition import TruncatedSVD
+from  sklearn.pipeline import Pipeline
 design_filepath="CorpusCallSteering/Design"
 eval_filepath="CorpusCallSteering/Evaluation"
 
-scoring={'acc':'accuracy',
-    'prec':make_scorer(precision_score,average="micro"),
-    'rec':make_scorer(recall_score,average="micro"),}
+scoring={'acc':get_scorer('accuracy'),
+    'prec':get_scorer('precision_weighted'),
+    'rec':get_scorer('recall_micro'),
+    'f1':get_scorer('f1_weighted'),
+     }
 
 
 def recover_from_files(filepath):
@@ -48,16 +53,19 @@ def ver_entrenamiento(clf,x_data,y_data,cv=5):
     for k in keys:
         print(k,cross_val[k].mean())
 
-def busqueda_cv(clf, x_data,y_data,parameters,cv=5,metric='acc'):
+def busqueda_cv(clf, x_data,y_data,parameters,cv=5,metric='f1'):
 
-    grid = GridSearchCV(clf, parameters,scoring=scoring,cv=cv,
+    grid = GridSearchCV(clf, parameters,scoring=scoring,cv=cv,return_train_score=True,
                 refit=metric).fit(x_data,y_data)
     best=grid.best_estimator_
     print(best)
-    print(grid.best_score_)
+
+    for scorer in scoring:
+        print("Train",scorer,grid.cv_results_['mean_train_{}'.format(scorer)][grid.best_index_])
+        print("Test",scorer,grid.cv_results_['mean_test_{}'.format(scorer)][grid.best_index_])
     return best
 
-def rendimiento_final(clf,x_data,y_data,count_vect):
+def rendimiento_final(clf,pipe):
 
     text,target,classes,classes_reverse=recover_from_files(eval_filepath)
 
@@ -65,10 +73,11 @@ def rendimiento_final(clf,x_data,y_data,count_vect):
     y_test=[classes_reverse[x] for x in target]
 
     #Vectorize data
-    x_test = count_vect.transform(text)
+    x_test = pipe.transform(text)
+
     print("Final test")
     for key in scoring:
-        print(key,get_scorer(scoring[key])(clf,x_test,y_test))
+        print(key,scoring[key](clf,x_test,y_test))
 
 if __name__=="__main__":
     text,target,classes,classes_reverse=recover_from_files(design_filepath)
@@ -81,7 +90,14 @@ if __name__=="__main__":
 
     #Vectorize data
     count_vect = CountVectorizer(stop_words='english')
-    x_data = count_vect.fit_transform(text)
+    tf_transformer = TfidfTransformer(use_idf=False)
+    svd=TruncatedSVD(n_components=100)
+
+    pipe=Pipeline([('counter',count_vect),
+        ('tf_idf',tf_transformer),
+        #('svd',svd)
+        ])
+    x_data = pipe.fit_transform(text)
 
     print("Número de textos",len(text))
     print("Tamaño del vocabulario",len(count_vect.vocabulary_))
@@ -90,32 +106,34 @@ if __name__=="__main__":
     clf=MultinomialNB()
     best=busqueda_cv(clf, x_data,y_data,parameters)
 
-    # parameters =  {'penalty':('l1','l2'),'C': [0.1, 1, 10]}
-    # clf = LogisticRegression()
-    # best=busqueda_cv(clf, x_data,y_data,parameters)
-    #
-    # parameters = [
-    #   {'C': [0.1, 1, 10], 'kernel': ['linear']},
-    #   {'C': [0.1, 1, 10], 'gamma': [0.001, 0.0001], 'kernel': ['rbf']},
-    #  ]
-    # clf = SVC()
-    # best=busqueda_cv(clf, x_data,y_data,parameters)
-    #
-    # parameters={'min_samples_split':[0.0001,0.001,0.01]}
-    # clf=DecisionTreeClassifier()
-    # best=busqueda_cv(clf, x_data,y_data,parameters)
-    #
-    # parameters={'loss':('hinge','log'), 'alpha':[0.0001,0.001]}
-    # clf=SGDClassifier()
-    # best=busqueda_cv(clf, x_data,y_data,parameters)
-    #
-    # parameters={'n_estimators':[5,10], 'criterion':('gini','entropy'),'min_samples_split':[0.0001,0.001,0.01]}
-    # clf= RandomForestClassifier()
-    # best=busqueda_cv(clf, x_data,y_data,parameters)
+    parameters =  {'penalty':('l1','l2'),'C': [0.1, 1, 10]}
+    clf = LogisticRegression()
+    best=busqueda_cv(clf, x_data,y_data,parameters)
 
-    predictions=best.predict(x_data)
-    for y_pred,y_target,txt in zip(predictions,y_data,text):
-        if(y_pred!=y_target):
-            print(txt,"Expected",classes[y_target],"Predicted",classes[y_pred])
+    parameters = [
+      {'C': [0.1, 1, 10], 'kernel': ['linear']},
+      {'C': [0.1, 1, 10], 'gamma': [0.001, 0.0001], 'kernel': ['rbf']},
+     ]
+    clf = SVC()
+    best=busqueda_cv(clf, x_data,y_data,parameters)
 
-    #rendimiento_final(best,x_data,y_data,count_vect)
+    parameters={'min_samples_split':[0.0001,0.001,0.01]}
+    clf=DecisionTreeClassifier()
+    best=busqueda_cv(clf, x_data,y_data,parameters)
+
+    parameters={'max_iter': [1000] ,'tol':[1e-3],
+        'loss':('hinge','log'), 'alpha':[0.0001,0.001]}
+    clf=SGDClassifier()
+    best=busqueda_cv(clf, x_data,y_data,parameters)
+
+    parameters={'n_estimators':[5,10], 'criterion':('gini','entropy'),'min_samples_split':[0.0001,0.001,0.01]}
+    clf= RandomForestClassifier()
+    best=busqueda_cv(clf, x_data,y_data,parameters)
+
+
+    # predictions=best.predict(x_data)
+    # for y_pred,y_target,txt in zip(predictions,y_data,text):
+    #     if(y_pred!=y_target):
+    #         print(txt,"Expected",classes[y_target],"Predicted",classes[y_pred])
+
+    #rendimiento_final(best,pipe)
