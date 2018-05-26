@@ -1,3 +1,4 @@
+import numpy as np
 import os
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.model_selection import train_test_split
@@ -12,13 +13,15 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfTransformer
 from sklearn.decomposition import TruncatedSVD
 from  sklearn.pipeline import Pipeline
+
+from nltk.stem.snowball import EnglishStemmer
 design_filepath="CorpusCallSteering/Design"
 eval_filepath="CorpusCallSteering/Evaluation"
 
 scoring={'acc':get_scorer('accuracy'),
-    'prec':get_scorer('precision_weighted'),
+    'prec':get_scorer('precision_micro'),
     'rec':get_scorer('recall_micro'),
-    'f1':get_scorer('f1_weighted'),
+    'f1':get_scorer('f1_micro'),
      }
 
 
@@ -56,12 +59,13 @@ def ver_entrenamiento(clf,x_data,y_data,cv=5):
 def busqueda_cv(clf, x_data,y_data,parameters,cv=5,metric='f1'):
 
     grid = GridSearchCV(clf, parameters,scoring=scoring,cv=cv,return_train_score=True,
-                refit=metric).fit(x_data,y_data)
+                refit=metric,n_jobs=-1).fit(x_data,y_data)
     best=grid.best_estimator_
     print(best)
 
     for scorer in scoring:
         print("Train",scorer,grid.cv_results_['mean_train_{}'.format(scorer)][grid.best_index_])
+    for scorer in scoring:
         print("Test",scorer,grid.cv_results_['mean_test_{}'.format(scorer)][grid.best_index_])
     return best
 
@@ -79,6 +83,12 @@ def rendimiento_final(clf,pipe):
     for key in scoring:
         print(key,scoring[key](clf,x_test,y_test))
 
+stemmer=EnglishStemmer( ignore_stopwords=True)
+class StemmedCountVectorizer(CountVectorizer):
+    def build_analyzer(self):
+        analyzer = super(StemmedCountVectorizer, self).build_analyzer()
+        return lambda doc: ([stemmer.stem(w) for w in analyzer(doc)])
+
 if __name__=="__main__":
     text,target,classes,classes_reverse=recover_from_files(design_filepath)
 
@@ -88,25 +98,30 @@ if __name__=="__main__":
     # text_train, text_val, y_train, y_val=train_test_split(text,y_data,random_seed=30,
     #     test_size=0.2)
 
+
     #Vectorize data
-    count_vect = CountVectorizer(stop_words='english')
-    tf_transformer = TfidfTransformer(use_idf=False)
-    svd=TruncatedSVD(n_components=100)
+    #bigrams do not improve
+    count_vect = StemmedCountVectorizer(stop_words='english')
+    #use_idf makes classification worse
+    tf_transformer = TfidfTransformer(use_idf=True)
+    #svd=TruncatedSVD(n_components=300)
 
     pipe=Pipeline([('counter',count_vect),
         ('tf_idf',tf_transformer),
-        #('svd',svd)
+    #    ('svd',svd)
         ])
+
     x_data = pipe.fit_transform(text)
 
+    #print("",np.cumsum(svd.explained_variance_ratio_))
     print("Número de textos",len(text))
     print("Tamaño del vocabulario",len(count_vect.vocabulary_))
 
-    parameters =  {'alpha': [0.01, 1, 5]}
-    clf=MultinomialNB()
-    best=busqueda_cv(clf, x_data,y_data,parameters)
+    # parameters =  {'alpha': [0.01, 1, 5]}
+    # clf=MultinomialNB()
+    # best=busqueda_cv(clf, x_data,y_data,parameters)
 
-    parameters =  {'penalty':('l1','l2'),'C': [0.1, 1, 10]}
+    parameters =  {'penalty':('l1','l2'),'C': [0.01,0.1, 1, 10,100]}
     clf = LogisticRegression()
     best=busqueda_cv(clf, x_data,y_data,parameters)
 
@@ -117,23 +132,26 @@ if __name__=="__main__":
     clf = SVC()
     best=busqueda_cv(clf, x_data,y_data,parameters)
 
-    parameters={'min_samples_split':[0.0001,0.001,0.01]}
-    clf=DecisionTreeClassifier()
-    best=busqueda_cv(clf, x_data,y_data,parameters)
-
     parameters={'max_iter': [1000] ,'tol':[1e-3],
         'loss':('hinge','log'), 'alpha':[0.0001,0.001]}
     clf=SGDClassifier()
     best=busqueda_cv(clf, x_data,y_data,parameters)
 
-    parameters={'n_estimators':[5,10], 'criterion':('gini','entropy'),'min_samples_split':[0.0001,0.001,0.01]}
-    clf= RandomForestClassifier()
-    best=busqueda_cv(clf, x_data,y_data,parameters)
+
+    # parameters={'min_samples_split':[0.0001,0.001,0.01]}
+    # clf=DecisionTreeClassifier()
+    # best=busqueda_cv(clf, x_data,y_data,parameters)
 
 
-    # predictions=best.predict(x_data)
+    # parameters={'n_estimators':[5,10], 'criterion':('gini','entropy'),'min_samples_split':[0.0001,0.001,0.01]}
+    # clf= RandomForestClassifier()
+    # best=busqueda_cv(clf, x_data,y_data,parameters)
+
+
+
+    predictions=best.predict(x_data)
     # for y_pred,y_target,txt in zip(predictions,y_data,text):
     #     if(y_pred!=y_target):
     #         print(txt,"Expected",classes[y_target],"Predicted",classes[y_pred])
-
+    print("Average accuracy",sum(y_pred==y_target for y_pred,y_target in zip(predictions,y_data))/len(predictions))
     #rendimiento_final(best,pipe)
