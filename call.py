@@ -19,13 +19,21 @@ design_filepath="CorpusCallSteering/Design"
 eval_filepath="CorpusCallSteering/Evaluation"
 
 scoring={'acc':get_scorer('accuracy'),
-    'prec':get_scorer('precision_micro'),
-    'rec':get_scorer('recall_micro'),
-    'f1':get_scorer('f1_micro'),
+    'prec':get_scorer('precision_weighted'),
+    'rec':get_scorer('recall_weighted'),
+    'f1':get_scorer('f1_weighted'),
      }
 
 
 def recover_from_files(filepath):
+    """
+    Dada una ruta, devuelve todos los ejemplos de entrenamiento en ficheros junto con su clasificación. Cada fichero debe contener los ejemplos de un sólo tipo y su nombre debe ser el nombre de la clase más la extensión
+    
+    text: textos de entrenamiento. Es una lista de strings.
+    target: Clasificación de cada texto. Lista de strings.
+    classes: Lista de clases.
+    classes_reverse: dada una clase en string, devuelve su índice numérico.
+    """
     files=sorted(os.listdir(filepath))
 
     classes=[]
@@ -48,7 +56,9 @@ def recover_from_files(filepath):
 
 
 def ver_entrenamiento(clf,x_data,y_data,cv=5):
-
+    """
+    Hace validación cruzada de un clasificador con los datos recibidos
+    """
     print(clf)
     cross_val=cross_validate(clf, x_data,y_data,
             cv=cv,scoring=scoring,return_train_score=True)
@@ -56,8 +66,12 @@ def ver_entrenamiento(clf,x_data,y_data,cv=5):
     for k in keys:
         print(k,cross_val[k].mean())
 
-def busqueda_cv(clf, x_data,y_data,parameters,cv=5,metric='f1'):
-
+def busqueda_cv(clf, x_data,y_data,parameters,cv=5,metric='acc'):
+    """
+    Realiza una optimización de los hiperparámetros del modelo con validación cruzada. Se optimiza una métrica perteneciente al diccionario scoring definido al principio del fichero (accuracy, recall, precision, f1), pero se calculan todas.
+    
+    Devuelve el clasificador entrenado con la mejor combinación de hiperparámetros
+    """
     grid = GridSearchCV(clf, parameters,scoring=scoring,cv=cv,return_train_score=True,
                 refit=metric,n_jobs=-1).fit(x_data,y_data)
     best=grid.best_estimator_
@@ -67,10 +81,12 @@ def busqueda_cv(clf, x_data,y_data,parameters,cv=5,metric='f1'):
         print("Train",scorer,grid.cv_results_['mean_train_{}'.format(scorer)][grid.best_index_])
     for scorer in scoring:
         print("Test",scorer,grid.cv_results_['mean_test_{}'.format(scorer)][grid.best_index_])
-    return best
+    return grid
 
 def rendimiento_final(clf,pipe):
-
+    """
+    Devuelve el rendimiento final sobre un conjunto de pruebas que no se ha usado en el entrenamiento ni en la validación
+    """
     text,target,classes,classes_reverse=recover_from_files(eval_filepath)
 
     # Convert class to numeric
@@ -85,6 +101,9 @@ def rendimiento_final(clf,pipe):
 
 stemmer=EnglishStemmer( ignore_stopwords=True)
 class StemmedCountVectorizer(CountVectorizer):
+    """
+    Versión del CountVectorizer que aplica stemming a las palabras, reduciendo el tamaño del vocabulario
+    """
     def build_analyzer(self):
         analyzer = super(StemmedCountVectorizer, self).build_analyzer()
         return lambda doc: ([stemmer.stem(w) for w in analyzer(doc)])
@@ -149,9 +168,9 @@ if __name__=="__main__":
 
 
 
-    predictions=best.predict(x_data)
+    # predictions=best.predict(x_data)
     # for y_pred,y_target,txt in zip(predictions,y_data,text):
     #     if(y_pred!=y_target):
     #         print(txt,"Expected",classes[y_target],"Predicted",classes[y_pred])
-    print("Average accuracy",sum(y_pred==y_target for y_pred,y_target in zip(predictions,y_data))/len(predictions))
-    #rendimiento_final(best,pipe)
+    # print("Average accuracy",sum(y_pred==y_target for y_pred,y_target in zip(predictions,y_data))/len(predictions))
+    rendimiento_final(best,pipe)
